@@ -15,11 +15,11 @@ class DecoderTransformer(nn.Module):
     def __init__(
             self,
             padding_idx,
-            embedding_dim,
             num_embeddings,
+            embedding_dim,
             num_heads=8,
-            out_classes=10,
             num_blocks=6,
+            out_classes=10,
             activation_type="gelu"):
         super().__init__()
 
@@ -34,16 +34,17 @@ class DecoderTransformer(nn.Module):
 
         # Decoder Blocks.
         self.decoder_blocks = nn.ModuleList()
-        self.decoder_blocks.append(
-            TransformerBlock(
-                heads=num_heads,
-                dim=embedding_dim,
-                use_self_attn=True,
-                use_cross_attn=False,
-                use_masked_attn=True,
-                activation_type=activation_type
+        for _ in range(num_blocks):
+            self.decoder_blocks.append(
+                TransformerBlock(
+                    heads=num_heads,
+                    dim=embedding_dim,
+                    use_self_attn=True,
+                    use_cross_attn=False,
+                    use_masked_attn=True,
+                    activation_type=activation_type
+                )
             )
-        )
 
         self.classifier = nn.Sequential(
             LinearBlock(
