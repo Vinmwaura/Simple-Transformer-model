@@ -1,4 +1,3 @@
-import json
 import string
 import random
 
@@ -11,13 +10,11 @@ Loads Character's Embeddings Dataset.
 class CharacterEmbeddingDataset(Dataset):
     def __init__(
             self,
-            dataset_path,
+            dataset,
+            padding_idx,
             context_window=200):
-        with open(dataset_path, "r") as json_f:
-            dataset_dict = json.load(json_f)
-
-        self.dataset = dataset_dict["all"]
-        self.padding_idx = len(dataset_dict["vocab"])
+        self.dataset = dataset
+        self.padding_idx = padding_idx
         self.context_window = context_window
 
         if len(self.dataset) == 0:
