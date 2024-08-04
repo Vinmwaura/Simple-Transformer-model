@@ -16,6 +16,7 @@ class DecoderTransformer(nn.Module):
             self,
             padding_idx,
             num_embeddings,
+            hidden_dim,
             embedding_dim,
             num_heads=8,
             num_blocks=6,
@@ -29,8 +30,7 @@ class DecoderTransformer(nn.Module):
                 num_embeddings=num_embeddings,
                 embedding_dim=embedding_dim,
                 padding_idx=padding_idx),
-            PositionalEncoding()
-        )
+            PositionalEncoding())
 
         # Decoder Blocks.
         self.decoder_blocks = nn.ModuleList()
@@ -38,7 +38,8 @@ class DecoderTransformer(nn.Module):
             self.decoder_blocks.append(
                 TransformerBlock(
                     heads=num_heads,
-                    dim=embedding_dim,
+                    hidden_dim=hidden_dim,
+                    embedding_dim=embedding_dim,
                     use_self_attn=True,
                     use_cross_attn=False,
                     use_masked_attn=True,
@@ -49,10 +50,10 @@ class DecoderTransformer(nn.Module):
         self.classifier = nn.Sequential(
             LinearBlock(
                 in_dim=embedding_dim,
-                out_dim=512,
+                out_dim=hidden_dim,
                 use_activation=True),
             LinearBlock(
-                in_dim=512,
+                in_dim=hidden_dim,
                 out_dim=out_classes,
                 use_activation=False))
 
@@ -72,13 +73,11 @@ class DecoderTransformer(nn.Module):
             own_state[name].copy_(param)
 
     def forward(self, x):
-        # Learnable Embedding + Positional Encodings.
-        x = self.emb_layers(x)
-
         # Decoder Blocks.
+        x_dec = self.emb_layers(x)
         for decoder_block in self.decoder_blocks:
-            x = decoder_block(x)
+            x_dec = decoder_block(x_dec)
 
         # Classifer Out.
-        x = self.classifier(x)
-        return x
+        x_class = self.classifier(x_dec)
+        return x_class

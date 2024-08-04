@@ -115,44 +115,44 @@ class SelfAttentionBlock(nn.Module):
     def __init__(
             self,
             heads=8,
-            dim=512,
+            embedding_dim=512,
+            hidden_dim=2_048,
             use_masked_attn=True,
             activation_type="gelu"):
         super().__init__()
 
-        self.dim = dim
         self.heads = heads
         self.use_masked_attn = use_masked_attn
 
         self.q_block = nn.Sequential(
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
                 use_activation=True,
                 activation_type=activation_type),
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
                 use_activation=False))
         self.k_block = nn.Sequential(
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
                 use_activation=True,
                 activation_type=activation_type),
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
                 use_activation=False))
         self.v_block = nn.Sequential(
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
                 use_activation=True,
                 activation_type=activation_type),
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
                 use_activation=True,
                 activation_type=activation_type))
 
@@ -165,29 +165,34 @@ class SelfAttentionBlock(nn.Module):
         D_split = D // self.heads
 
         # Logically split into heads.
+        # (N, H, Seq, D_split)
         q_head_split = q.reshape(
-            N, Seq, self.heads, D_split).permute(0, 2, 1, 3)  # (N, H, Seq, D_split)
+            N, Seq, self.heads, D_split).permute(0, 2, 1, 3)
         k_head_split = k.reshape(
-            N, Seq, self.heads, D_split).permute(0, 2, 1, 3)  # (N, H, Seq, D_split)
+            N, Seq, self.heads, D_split).permute(0, 2, 1, 3)
         v_head_split = v.reshape(
-            N, Seq, self.heads, D_split).permute(0, 2, 1, 3)  # (N, H, Seq, D_split)
+            N, Seq, self.heads, D_split).permute(0, 2, 1, 3)
 
-        qk_T = torch.einsum("nhqd,nhkd->nhqk", q_head_split, k_head_split)  # (N,H,Seq_q,D_split),(N,H,Seq_k,D_split) => (N,H,Seq_q,Seq_k)
-        qk_T_normalized = qk_T / (self.dim**0.5)  # (N, H, Seq_q, Seq_k)
+        # (N, H, Seq_q, D_split),(N, H, Seq_k, D_split) => (N, H, Seq_q, Seq_k)
+        qk_T = torch.einsum("nhqd,nhkd->nhqk", q_head_split, k_head_split)
+        qk_T_normalized = qk_T / (D_split**0.5)  # (N, H, Seq_q, Seq_k)
 
         if self.use_masked_attn:
             _, Seq, _ = x.shape
-            mask = torch.ones((1, 1, Seq, Seq), device=q.device)  # (1, 1, Seq, Seq)
-            mask = torch.triu(mask, diagonal=1)  # (1, 1, Seq, Seq)
+            # (1, 1, Seq, Seq)
+            mask = torch.ones((1, 1, Seq, Seq), device=q.device)
+            mask = torch.triu(mask, diagonal=1)
 
-            qk_T_normalized_masked = (qk_T_normalized * (1 - mask)) + (2e9 * mask)  # (N, H, Seq_q, Seq_k)
-            qk_T_normalized_masked[qk_T_normalized_masked>=2e9] = -torch.inf  # (N, H, Seq_q, Seq_k)
+            # (N, H, Seq_q, Seq_k)
+            qk_T_normalized_masked = (qk_T_normalized * (1 - mask)) + (2e9 * mask)
+            qk_T_normalized_masked[qk_T_normalized_masked>=2e9] = -torch.inf
 
             qk_T_softmax = F.softmax(qk_T_normalized_masked, dim=3)  # (N, H, Seq_q, Seq_k)
         else:
             qk_T_softmax = F.softmax(qk_T_normalized, dim=3)  # (N, H, Seq_q, Seq_k)
 
-        attention_out = torch.einsum("nhqk,nhkd->nhqd", qk_T_softmax, v_head_split)  # (N, H, Seq, D_split)
+        # (N, H, Seq, D_split)
+        attention_out = torch.einsum("nhqk,nhkd->nhqd", qk_T_softmax, v_head_split)
 
         # Merge multi-head computations.
         N, Head, Seq, Dsplit = attention_out.shape
@@ -202,42 +207,42 @@ class CrossAttentionBlock(nn.Module):
     def __init__(
             self,
             heads=8,
-            dim=512,
+            hidden_dim=2_048,
+            embedding_dim=512,
             activation_type="gelu"):
         super().__init__()
 
-        self.dim = dim
         self.heads = heads
 
         self.q_block = nn.Sequential(
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
                 use_activation=True,
                 activation_type=activation_type),
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
                 use_activation=False))
         self.k_block = nn.Sequential(
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
                 use_activation=True,
                 activation_type=activation_type),
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
                 use_activation=False))          
         self.v_block = nn.Sequential(
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
                 use_activation=True,
                 activation_type=activation_type),
             LinearBlock(
-                in_dim=dim,
-                out_dim=dim,
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
                 use_activation=False))
 
     def forward(self, x, enc):
@@ -251,22 +256,26 @@ class CrossAttentionBlock(nn.Module):
         D_split = D // self.heads
 
         # Logically split into heads.
+        # (N, H, Seq_q, D_split)
         q_head_split = q.reshape(
-            N_q, Seq_q, self.heads, D_split).permute(0, 2, 1, 3)  # (N, H, Seq_q, D_split)
+            N_q, Seq_q, self.heads, D_split).permute(0, 2, 1, 3)
         k_head_split = k.reshape(
-            N_q, Seq_k, self.heads, D_split).permute(0, 2, 1, 3)  # (N, H, Seq_q, D_split)
+            N_q, Seq_k, self.heads, D_split).permute(0, 2, 1, 3)
         v_head_split = v.reshape(
-            N_q, Seq_v, self.heads, D_split).permute(0, 2, 1, 3)  # (N, H, Seq_q, D_split)
+            N_q, Seq_v, self.heads, D_split).permute(0, 2, 1, 3)
 
-        qk_T = torch.einsum("nhqd,nhkd->nhqk", q_head_split, k_head_split)  # (N,H,Seq_q,D_split),(H,Seq_k,D_split)=>(N,H,Seq_q,Seq_k)
-        qk_T_normalized = qk_T / (self.dim**0.5)  # (N, H, Seq_q, Seq_k)
+        # (N, H, Seq_q, D_split),(N, H, Seq_k, D_split) => (N, H, Seq_q, Seq_k)
+        qk_T = torch.einsum("nhqd,nhkd->nhqk", q_head_split, k_head_split)
+        qk_T_normalized = qk_T / (D_split**0.5)  # (N, H, Seq_q, Seq_k)
 
         qk_T_softmax = F.softmax(qk_T_normalized, dim=3)  # (N, H, Seq_q, Seq_k)
 
-        attention_out = torch.einsum("nhqv,nhvd->nhqd", qk_T_softmax, v_head_split)  # (N, H, Seq_q, D_split)
+        # (N, H, Seq_q, D_split)
+        attention_out = torch.einsum("nhqv,nhvd->nhqd", qk_T_softmax, v_head_split)
 
         # Merge multi-head computations.
-        attention_out = attention_out.permute(0, 2, 1, 3).reshape(N_q, Seq_q, self.heads*D_split)  # (N, Seq, D)
+        # (N, Seq, D)
+        attention_out = attention_out.permute(0, 2, 1, 3).reshape(N_q, Seq_q, self.heads*D_split)
         return attention_out
 
 
@@ -277,7 +286,8 @@ class TransformerBlock(nn.Module):
     def __init__(
             self,
             heads=8,
-            dim=512,
+            hidden_dim=2048,
+            embedding_dim=512,
             use_self_attn=True,
             use_cross_attn=True,
             use_masked_attn=False,
@@ -291,35 +301,44 @@ class TransformerBlock(nn.Module):
         if self.use_self_attn:
             self.self_attn_block = SelfAttentionBlock(
                 heads=heads,
-                dim=dim,
+                embedding_dim=embedding_dim,
+                hidden_dim=hidden_dim,
                 use_masked_attn=use_masked_attn,
                 activation_type=activation_type)
             self.self_attn_ffn_res = ResidualLinearBlock(
-                dim=dim,
+                dim=embedding_dim,
                 activation_type=activation_type)
-            self.self_attn_norm = nn.LayerNorm(dim)
+            self.self_attn_norm = nn.LayerNorm(embedding_dim)
 
         # Cross Attention.
         if self.use_cross_attn:
             self.cross_attn_block = CrossAttentionBlock(
                 heads=heads,
-                dim=dim,
+                embedding_dim=embedding_dim,
+                hidden_dim=hidden_dim,
                 activation_type=activation_type)
             self.cross_attn_res = ResidualLinearBlock(
-                dim=dim,
+                dim=embedding_dim,
                 activation_type=activation_type)
-            self.cross_attn_norm = nn.LayerNorm(dim)
+            self.cross_attn_norm = nn.LayerNorm(embedding_dim)
 
         # FeedForward Layer.
-        self.feed_forward = LinearBlock(
-            in_dim=dim,
-            out_dim=dim,
-            use_activation=True,
-            activation_type=activation_type)
+        self.feed_forward = nn.Sequential(
+            LinearBlock(
+                in_dim=embedding_dim,
+                out_dim=hidden_dim,
+                use_activation=True,
+                activation_type=activation_type),
+            LinearBlock(
+                in_dim=hidden_dim,
+                out_dim=embedding_dim,
+                use_activation=True,
+                activation_type=activation_type),
+            nn.LayerNorm(embedding_dim))
         self.feed_forward_res = ResidualLinearBlock(
-            dim=dim,
+            dim=embedding_dim,
             activation_type=activation_type)
-        self.feed_forward_norm = nn.LayerNorm(dim)
+        self.feed_forward_norm = nn.LayerNorm(embedding_dim)
 
     def forward(self, x, enc=None):
         if self.use_self_attn:
