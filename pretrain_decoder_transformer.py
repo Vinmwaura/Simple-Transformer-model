@@ -18,12 +18,88 @@ from utils.model_utils import (
     save_model,
     load_model)
 
+def generate_text(
+        model,
+        vocab,
+        start_token,
+        context_window,
+        logging,
+        device,
+        temperature=1):
+    vocab_size = len(vocab)
+
+    # Generate a sample text to test generative capabilities.
+    model.eval()
+
+    logging.info(f"Starting Character: \"{vocab[start_token]}\"")
+
+    generated_token_list = [start_token]
+    while len(generated_token_list) < context_window:
+        all_generated_token = generated_token_list[:]
+
+        generated_token_tensor = torch.tensor([all_generated_token], device=device)
+
+        with torch.no_grad():
+            out_seq = model(generated_token_tensor)  # (1, Seq)
+
+        """
+        Lower Temperature (T < 1):
+        Prioritizes the most probable next token and effectively reduces
+        randomness in the generated token.
+
+        Higher Temperature (T > 1):
+        Less probable tokens become more likely to be chosen, therefore more
+        diversity in generated token.
+        """
+        probs = F.softmax(out_seq[0] / temperature, dim=1)
+
+        # Pick most likely token for next generation for each Token Sequence (Seq).
+        next_token = torch.multinomial(probs, 1).squeeze(1)
+
+        # Save last token for next prediction.
+        generated_token_list.append(next_token[-1].item())
+
+    # Remove invalid tokens if any like padding token, not in vocab list.
+    cleaned_pred_tokens = [clean_token for clean_token in generated_token_list if clean_token < vocab_size]
+    pred_token_list = [vocab[c] for c in cleaned_pred_tokens]
+    pred_txt = "".join(pred_token_list)
+    logging.info(f"Generated text: {repr(pred_txt)}")
+
+def classification_metric(model, dataloader, logging, device):
+    # Compute Classification Metric.
+    accuracy = compute_classification(
+        model=model,
+        dataloader=dataloader,
+        device=device)
+    message = "Test Accuracy: {:.5f}".format(accuracy)
+    logging.info(message)
+
+def checkpoint_model(data_dict, model, model_optim, logging):
+    out_dir = data_dict["out_dir"]
+    global_steps = data_dict["global_steps"]
+
+    # Save model that has achieved max TPR with the dataset.
+    model_dict = {
+        "global_steps": global_steps,
+        "model": model.state_dict(),
+        "optimizer": model_optim.state_dict()}
+
+    save_status = save_model(
+        model_dict=model_dict,
+        dest_path=out_dir,
+        file_name=f"{global_steps}_model.pt",
+        logging=logging.info)
+    if save_status is True:
+        logging.info("Successfully saved model.")
+    else:
+        logging.info("Error occured saving model.")
+
 def main():
-    project_name = "Decoder Transformer"
+    project_name = "Decoder-Only Transformer"
 
     parser = argparse.ArgumentParser(
-        description="Pre-train Conditional Classifier model.")
-    
+        description="Pre-train Decoder-Only Transformer model.")
+
     parser.add_argument(
         "--device",
         help="Which hardware device will model run on",
@@ -36,51 +112,57 @@ def main():
         required=True,
         type=pathlib.Path)
     parser.add_argument(
-        "--load-optim",
-        help="Load saved optim parameters with model",
+        "--test-model",
+        help="Test model's accuracy using testing dataset during checkpointing",
+        type=bool,
+        default=False)
+    parser.add_argument(
+        "--resume-training",
+        help="Resume training where checkpoint stopped, if loading model",
         type=bool,
         default=False)
     parser.add_argument(
         "--tr-batch-size",
-        help="Batch size for train dataset",
+        help="Batch size of training dataset",
         type=int,
         default=64)
     parser.add_argument(
         "--tst-batch-size",
-        help="Batch size for test dataset",
+        help="Batch size of testing dataset",
         type=int,
         default=128)
     parser.add_argument(
         "--checkpoint-steps",
-        help="Step to checkpoint and test model",
+        help="Steps for checkpointing and/or testing model",
         type=int,
         default=1_000)
     parser.add_argument(
         "--model-checkpoint",
-        help="File path to model checkpoint being trained",
+        help="File path to model checkpoint to load from (if any)",
         required=False,
         default=None,
         type=pathlib.Path)
     parser.add_argument(
         "-c",
         "--config-path",
-        help="File path to load json config file",
+        help="File path to JSON config file",
         required=True,
         type=pathlib.Path)
     parser.add_argument(
         "--out-dir",
-        help="Folder path for output directory",
+        help="Folder path of output directory",
         required=True)
 
     args = vars(parser.parse_args())
 
     device = args["device"]  # Device to run model on.
-    load_optim = args["load_optim"]  # Load saved optim parameters.
+    resume_training = args["resume_training"]  # Resume training using previous checkpoints.
     dataset_path = args["dataset_path"]  # JSON file path (*.json).
-    tr_batch_size = args["tr_batch_size"]  # Batch size for train dataset.
-    tst_batch_size = args["tst_batch_size"]  # Batch size for test dataset.
+    tr_batch_size = args["tr_batch_size"]  # Batch size of training dataset.
+    tst_batch_size = args["tst_batch_size"]  # Batch size of testing dataset.
     model_checkpoint = args["model_checkpoint"]  # Filepath to models saved.
     checkpoint_steps = args["checkpoint_steps"]  # Steps to checkpoint model.
+    test_model = args["test_model"]  # Test model flag.
 
     out_dir = args["out_dir"]  # Destination path for model.
     try:
@@ -97,6 +179,7 @@ def main():
     model_lr = config_dict["model_lr"]
     num_heads = config_dict["num_heads"]
     num_blocks = config_dict["num_blocks"]
+    hidden_dim = config_dict["hidden_dim"]
     embedding_dim = config_dict["embedding_dim"]
     context_window = config_dict["context_window"]
     activation_type = config_dict["activation_type"]
@@ -108,7 +191,7 @@ def main():
     with open(dataset_path, "r") as json_f:
         json_dataset = json.load(json_f)
 
-    # Vocabulary size of NLP dataset.
+    # Vocabulary / Vocabulary size of NLP dataset.
     vocab = json_dataset["vocab"]
     vocab_size = len(vocab)
 
@@ -135,13 +218,16 @@ def main():
         shuffle=True)
 
     model_transformer = DecoderTransformer(
-        padding_idx=vocab_size,
-        num_embeddings=vocab_size+1,
+        padding_idx=vocab_size,  # Padding index is length of Vocabulary.
+        num_embeddings=vocab_size + 1,  #  Number of tokens including padding token.
+        hidden_dim=hidden_dim,
         embedding_dim=embedding_dim,
         num_heads=num_heads,
         out_classes=vocab_size,
         num_blocks=num_blocks,
         activation_type=activation_type)
+
+    global_steps = 0
 
     # Load Transformer Model checkpoints if any.
     if model_checkpoint is not None:
@@ -158,10 +244,10 @@ def main():
             lr=model_lr,
             betas=(0.5, 0.999))
 
-        if load_optim:
+        if resume_training:
+            logging.info("Resuming Training using saved optimizer weights and global_steps...")
             model_transformer_optim.load_state_dict(classifier_dict["optimizer"])
-
-        global_steps = classifier_dict["global_steps"]
+            global_steps = classifier_dict["global_steps"]
     else:
         model_transformer = model_transformer.to(device)
 
@@ -169,8 +255,6 @@ def main():
             model_transformer.parameters(),
             lr=model_lr,
             betas=(0.5, 0.999))
-
-        global_steps = 0
 
     # Model Params size.
     model_params_size = sum(param.numel() for param in model_transformer.parameters())
@@ -181,7 +265,7 @@ def main():
     # Update learning rate in case of changes.
     for model_transformer_optim_ in model_transformer_optim.param_groups:
         model_transformer_optim_["lr"] = model_lr
-    
+
     # Constructs a ``scaler`` once, at the beginning of the convergence run, using default arguments.
     # If your network fails to converge with default ``GradScaler`` arguments, please file an issue.
     # The same ``GradScaler`` instance should be used for the entire convergence run.
@@ -237,58 +321,29 @@ def main():
         for index, (in_seq, target_seq) in enumerate(train_dataloader):
             # Checkpoint and test model.
             if global_steps % checkpoint_steps == 0:
-                # Compute Classification Metric.
-                accuracy = compute_classification(
+                if test_model:
+                    classification_metric(
+                        model=model_transformer,
+                        dataloader=test_dataloader,
+                        logging=logging,
+                        device=device)
+
+                # Checkpoint model weights.
+                checkpoint_model(
+                    data_dict={"out_dir": out_dir, "global_steps": global_steps},
                     model=model_transformer,
-                    dataloader=test_dataloader,
-                    device=device)
-                message = "Test Accuracy: {:.5f}".format(accuracy)
-                logging.info(message)
+                    model_optim=model_transformer_optim,
+                    logging=logging)
 
-                # Save model that has achieved max TPR with the dataset.
-                model_dict = {
-                    "global_steps": global_steps,
-                    "model": model_transformer.state_dict(),
-                    "optimizer": model_transformer_optim.state_dict()}
-
-                save_status = save_model(
-                    model_dict=model_dict,
-                    dest_path=out_dir,
-                    file_name=f"{global_steps}_model.pt",
-                    logging=logging.info)
-                if save_status is True:
-                    logging.info("Successfully saved model.")
-                else:
-                    logging.info("Error occured saving model.")
-            
-                # Generate a sample text to test generative capabilities.
-                model_transformer.eval()
-
-                # Pick a valid starting token.
-                test_seq, _ = next(iter(test_dataloader))
-                test_seq = test_seq.to(device)
-
-                # Get first token from last chunk to start the prediction.
-                generated_token = [test_seq[0, 0].item()]
-                while len(generated_token) < context_window:
-                    generated_token_ = generated_token[:]
-
-                    generated_token_tensor = torch.tensor([generated_token_], device=device)
-
-                    with torch.no_grad():
-                        out_seq = model_transformer(generated_token_tensor)
-
-                    out_seq = out_seq[0]
-                    probs = F.softmax(out_seq / 1, dim=1)
-                    next_token = torch.multinomial(probs, 1).squeeze(1)
-
-                    generated_token.append(next_token[len(generated_token) - 1].item())
-
-                # Remove invalid tokens if any like padding token, not in vocab list.
-                cleaned_pred_tokens = [clean_token for clean_token in generated_token if clean_token < vocab_size]
-                pred_token_list = [vocab[c] for c in cleaned_pred_tokens]
-                pred_txt = "".join(pred_token_list)
-                logging.info(f"Generated text: {repr(pred_txt)}")
+                # Test model generative capabilities.
+                generate_text(
+                    model=model_transformer,
+                    vocab=vocab,
+                    start_token=in_seq[0, 0].item(),  # Picks first token in training data, to test
+                    context_window=context_window,
+                    logging=logging,
+                    device=device,
+                    temperature=1)
 
             # Training Data.
             in_seq = in_seq.to(device)  # (N, Seq)
@@ -350,6 +405,30 @@ def main():
                 stop_training = True
                 break
 
+    # Final Test, Checkpoint, and Token generation capability.
+    if test_model:
+        classification_metric(
+            model=model_transformer,
+            dataloader=test_dataloader,
+            logging=logging,
+            device=device)
+
+    # Checkpoint model weights.
+    checkpoint_model(
+        data_dict={"out_dir": out_dir, "global_steps": global_steps},
+        model=model_transformer,
+        model_optim=model_transformer_optim,
+        logging=logging)
+
+    # Test model generative capabilities.
+    generate_text(
+        model=model_transformer,
+        vocab=vocab,
+        start_token=in_seq[0, 0].item(),  # Picks first token in training data, to test
+        context_window=context_window,
+        logging=logging,
+        device=device,
+        temperature=1)
+
 if __name__ == "__main__":
     main()
-
