@@ -13,57 +13,21 @@ from models.DecoderTransformer import DecoderTransformer
 
 from dataset_loader.character_dataset import CharacterEmbeddingDataset
 
-from utils.classification_utils import compute_classification
 from utils.model_utils import (
     save_model,
     load_model)
+from utils.token_utils import generate_text
+from utils.classification_utils import compute_classification
 
-def generate_text(
-        model,
-        vocab,
-        start_token,
-        context_window,
-        logging,
-        device,
-        temperature=1):
-    vocab_size = len(vocab)
+def restricted_float(x):
+    try:
+        x = float(x)
+    except ValueError:
+        raise argparse.ArgumentTypeError("%r not a floating-point literal" % (x,))
 
-    # Generate a sample text to test generative capabilities.
-    model.eval()
-
-    logging.info(f"Starting Character: \"{vocab[start_token]}\"")
-
-    generated_token_list = [start_token]
-    while len(generated_token_list) < context_window:
-        all_generated_token = generated_token_list[:]
-
-        generated_token_tensor = torch.tensor([all_generated_token], device=device)
-
-        with torch.no_grad():
-            out_seq = model(generated_token_tensor)  # (1, Seq)
-
-        """
-        Lower Temperature (T < 1):
-        Prioritizes the most probable next token and effectively reduces
-        randomness in the generated token.
-
-        Higher Temperature (T > 1):
-        Less probable tokens become more likely to be chosen, therefore more
-        diversity in generated token.
-        """
-        probs = F.softmax(out_seq[0] / temperature, dim=1)
-
-        # Pick most likely token for next generation for each Token Sequence (Seq).
-        next_token = torch.multinomial(probs, 1).squeeze(1)
-
-        # Save last token for next prediction.
-        generated_token_list.append(next_token[-1].item())
-
-    # Remove invalid tokens if any like padding token, not in vocab list.
-    cleaned_pred_tokens = [clean_token for clean_token in generated_token_list if clean_token < vocab_size]
-    pred_token_list = [vocab[c] for c in cleaned_pred_tokens]
-    pred_txt = "".join(pred_token_list)
-    logging.info(f"Generated text: {repr(pred_txt)}")
+    if x < 0.1:
+        raise argparse.ArgumentTypeError("%r not in range > 0.1"%(x,))
+    return x
 
 def classification_metric(model, dataloader, logging, device):
     # Compute Classification Metric.
@@ -98,29 +62,27 @@ def main():
     project_name = "Decoder-Only Transformer"
 
     parser = argparse.ArgumentParser(
-        description="Pre-train Decoder-Only Transformer model.")
+        description=f"Pre-train {project_name} model.")
 
     parser.add_argument(
         "--device",
-        help="Which hardware device will model run on",
+        help="Which hardware device will model run on.",
         choices=['cpu', 'cuda'],
         type=str,
         default="cpu")
     parser.add_argument(
         "--dataset-path",
-        help="File path to json dataset file",
+        help="File path to json dataset file.",
         required=True,
         type=pathlib.Path)
     parser.add_argument(
         "--test-model",
-        help="Test model's accuracy using testing dataset during checkpointing",
-        type=bool,
-        default=False)
+        action='store_true',
+        help="Test model's accuracy using testing dataset during checkpointing.")
     parser.add_argument(
         "--resume-training",
-        help="Resume training where checkpoint stopped, if loading model",
-        type=bool,
-        default=False)
+        action='store_true',
+        help="Resume training where checkpoint stopped, if loading model.")
     parser.add_argument(
         "--tr-batch-size",
         help="Batch size of training dataset",
@@ -128,32 +90,50 @@ def main():
         default=64)
     parser.add_argument(
         "--tst-batch-size",
-        help="Batch size of testing dataset",
+        help="Batch size of testing dataset.",
         type=int,
         default=128)
     parser.add_argument(
+        "--temperature",
+        help="Temperature for softmax sampling.",
+        type=restricted_float,
+        default=1.0)
+    parser.add_argument(
         "--checkpoint-steps",
-        help="Steps for checkpointing and/or testing model",
+        help="Steps for checkpointing and/or testing model.",
         type=int,
         default=1_000)
     parser.add_argument(
         "--model-checkpoint",
-        help="File path to model checkpoint to load from (if any)",
+        help="File path to model checkpoint to load from (if any).",
         required=False,
         default=None,
         type=pathlib.Path)
     parser.add_argument(
         "-c",
         "--config-path",
-        help="File path to JSON config file",
+        help="File path to JSON config file.",
         required=True,
         type=pathlib.Path)
     parser.add_argument(
         "--out-dir",
-        help="Folder path of output directory",
+        help="Folder path of output directory.",
         required=True)
 
     args = vars(parser.parse_args())
+
+    """
+    Lower Temperature (T < 1):
+    Prioritizes the most probable next token and effectively reduces
+    randomness in the generated token.
+
+    Higher Temperature (T > 1):
+    Less probable tokens become more likely to be chosen, therefore more
+    diversity in generated token.
+
+    Can't be 0, OBVIOUSLY!!
+    """
+    temperature = args["temperature"]
 
     device = args["device"]  # Device to run model on.
     resume_training = args["resume_training"]  # Resume training using previous checkpoints.
@@ -163,7 +143,6 @@ def main():
     model_checkpoint = args["model_checkpoint"]  # Filepath to models saved.
     checkpoint_steps = args["checkpoint_steps"]  # Steps to checkpoint model.
     test_model = args["test_model"]  # Test model flag.
-
     out_dir = args["out_dir"]  # Destination path for model.
     try:
         os.makedirs(out_dir, exist_ok=True)
@@ -244,6 +223,7 @@ def main():
             lr=model_lr,
             betas=(0.5, 0.999))
 
+        # Load Optimizer params and global steps params.
         if resume_training:
             logging.info("Resuming Training using saved optimizer weights and global_steps...")
             model_transformer_optim.load_state_dict(classifier_dict["optimizer"])
@@ -310,6 +290,9 @@ def main():
     logging.info("#" * 100)
     logging.info(f"Total Train Dataset: {len(train_dataset):,}")
     logging.info(f"Total Test Dataset (Excluded from Training): {len(test_dataset):,}")
+    logging.info("#" * 100)
+    logging.info(f"Sampling Parameters.")
+    logging.info(f"Temperature: {temperature:,}")
     logging.info("#" * 100)
 
     # Training starts here.
