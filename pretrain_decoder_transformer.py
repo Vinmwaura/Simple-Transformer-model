@@ -38,13 +38,12 @@ def classification_metric(model, dataloader, logging, device):
     message = "Test Accuracy: {:.5f}".format(accuracy)
     logging.info(message)
 
-def checkpoint_model(data_dict, model, model_optim, logging):
-    out_dir = data_dict["out_dir"]
+def checkpoint_model(data_dict, out_dir, model, model_optim, logging):
     global_steps = data_dict["global_steps"]
 
     # Save model that has achieved max TPR with the dataset.
     model_dict = {
-        "global_steps": global_steps,
+        **data_dict,
         "model": model.state_dict(),
         "optimizer": model_optim.state_dict()}
 
@@ -313,7 +312,15 @@ def main():
 
                 # Checkpoint model weights.
                 checkpoint_model(
-                    data_dict={"out_dir": out_dir, "global_steps": global_steps},
+                    data_dict={
+                        "num_heads": num_heads,
+                        "num_blocks": num_blocks,
+                        "hidden_dim": hidden_dim,
+                        "embedding_dim": embedding_dim,
+                        "context_window": context_window,
+                        "activation_type": activation_type,
+                        "global_steps": global_steps},
+                    out_dir=out_dir,
                     model=model_transformer,
                     model_optim=model_transformer_optim,
                     logging=logging)
@@ -398,7 +405,15 @@ def main():
 
     # Checkpoint model weights.
     checkpoint_model(
-        data_dict={"out_dir": out_dir, "global_steps": global_steps},
+        data_dict={
+            "num_heads": num_heads,
+            "num_blocks": num_blocks,
+            "hidden_dim": hidden_dim,
+            "embedding_dim": embedding_dim,
+            "context_window": context_window,
+            "activation_type": activation_type,
+            "global_steps": global_steps},
+        out_dir=out_dir,
         model=model_transformer,
         model_optim=model_transformer_optim,
         logging=logging)
