@@ -29,7 +29,11 @@ def restricted_float(x):
         raise argparse.ArgumentTypeError("%r not in range > 0.1"%(x,))
     return x
 
-def classification_metric(model, dataloader, logging, device):
+def classification_metric(
+        model,
+        dataloader,
+        logging,
+        device):
     # Compute Classification Metric.
     accuracy = compute_classification(
         model=model,
@@ -38,7 +42,12 @@ def classification_metric(model, dataloader, logging, device):
     message = "Test Accuracy: {:.5f}".format(accuracy)
     logging.info(message)
 
-def checkpoint_model(data_dict, out_dir, model, model_optim, logging):
+def checkpoint_model(
+        data_dict,
+        out_dir,
+        model,
+        model_optim,
+        logging):
     global_steps = data_dict["global_steps"]
 
     # Save model that has achieved max TPR with the dataset.
@@ -79,12 +88,8 @@ def main():
         action='store_true',
         help="Test model's accuracy using testing dataset during checkpointing.")
     parser.add_argument(
-        "--resume-training",
-        action='store_true',
-        help="Resume training where checkpoint stopped, if loading model.")
-    parser.add_argument(
         "--tr-batch-size",
-        help="Batch size of training dataset",
+        help="Batch size of training dataset.",
         type=int,
         default=64)
     parser.add_argument(
@@ -94,7 +99,7 @@ def main():
         default=128)
     parser.add_argument(
         "--temperature",
-        help="Temperature for softmax sampling.",
+        help="Temperature parameter for softmax sampling.",
         type=restricted_float,
         default=1.0)
     parser.add_argument(
@@ -108,6 +113,14 @@ def main():
         required=False,
         default=None,
         type=pathlib.Path)
+    parser.add_argument(
+        "--resume-training",
+        action='store_true',
+        help="Resuming training using previously stored parameters.")
+    parser.add_argument(
+        "--load-optim",
+        action='store_true',
+        help="Load model's optimizer's weights and parameters, if loading model.")
     parser.add_argument(
         "-c",
         "--config-path",
@@ -135,7 +148,8 @@ def main():
     temperature = args["temperature"]
 
     device = args["device"]  # Device to run model on.
-    resume_training = args["resume_training"]  # Resume training using previous checkpoints.
+    load_optim = args["load_optim"]  # Reload saved optimizer weights.
+    resume_training = args["resume_training"]
     dataset_path = args["dataset_path"]  # JSON file path (*.json).
     tr_batch_size = args["tr_batch_size"]  # Batch size of training dataset.
     tst_batch_size = args["tst_batch_size"]  # Batch size of testing dataset.
@@ -223,10 +237,14 @@ def main():
             betas=(0.5, 0.999))
 
         # Load Optimizer params and global steps params.
-        if resume_training:
+        if load_optim:
             logging.info("Resuming Training using saved optimizer weights and global_steps...")
             model_transformer_optim.load_state_dict(classifier_dict["optimizer"])
+
+        # Use previous global_steps.
+        if resume_training:
             global_steps = classifier_dict["global_steps"]
+
     else:
         model_transformer = model_transformer.to(device)
 
@@ -245,11 +263,7 @@ def main():
     for model_transformer_optim_ in model_transformer_optim.param_groups:
         model_transformer_optim_["lr"] = model_lr
 
-    # Constructs a ``scaler`` once, at the beginning of the convergence run, using default arguments.
-    # If your network fails to converge with default ``GradScaler`` arguments, please file an issue.
-    # The same ``GradScaler`` instance should be used for the entire convergence run.
-    # If you perform multiple convergence runs in the same script, each run should use
-    # a dedicated fresh ``GradScaler`` instance. ``GradScaler`` instances are lightweight.
+    # https://pytorch.org/docs/stable/amp.html
     scaler = torch.cuda.amp.GradScaler()
 
     # Log file path.
@@ -329,7 +343,7 @@ def main():
                 generate_text(
                     model=model_transformer,
                     vocab=vocab,
-                    start_token=in_seq[0, 0].item(),  # Picks first token in training data, to test
+                    start_token=in_seq[0, 0].item(),  # Pick first token in training data to test
                     context_window=context_window,
                     logging=logging,
                     device=device,
@@ -360,7 +374,6 @@ def main():
             # Scales loss. Calls ``backward()`` on scaled loss to create scaled gradients.
             scaler.scale(loss).backward()
 
-            # Otherwise, optimizer.step() is skipped.
             scaler.step(model_transformer_optim)
 
             # Updates the scale for next iteration.
