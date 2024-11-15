@@ -4,19 +4,21 @@ import torch.nn.functional as F
 def generate_text(
         model,
         vocab,
-        start_token,
+        init_text,
         context_window,
         logging,
         device,
         temperature=1):
     vocab_size = len(vocab)
 
-    # Generate a sample text to test generative capabilities.
     model.eval()
+    logging("#" * 100)
+    logging(f"Initial Text:\n{repr(init_text)}\n")
 
-    logging.info(f"Starting Character: \"{vocab[start_token]}\"")
+    list_characters = list(init_text)
+    token_list = [vocab.index(character) for character in list_characters]
 
-    generated_token_list = [start_token]
+    generated_token_list = token_list[:]
     while len(generated_token_list) < context_window:
         all_generated_token = generated_token_list[:]
 
@@ -37,4 +39,7 @@ def generate_text(
     cleaned_pred_tokens = [clean_token for clean_token in generated_token_list if clean_token < vocab_size]
     pred_token_list = [vocab[c] for c in cleaned_pred_tokens]
     pred_txt = "".join(pred_token_list)
-    logging.info(f"Generated text: {repr(pred_txt)}")
+
+    # TODO: Allow the option to print one character at a time.
+    logging(f"Generated text:\n{pred_txt}")
+    logging("#" * 100)

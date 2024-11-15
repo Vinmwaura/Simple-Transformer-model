@@ -1,6 +1,7 @@
 import os
 import json
 import math
+import random
 import pathlib
 import logging
 import argparse
@@ -327,6 +328,7 @@ def main():
                 # Checkpoint model weights.
                 checkpoint_model(
                     data_dict={
+                        "vocab": vocab,
                         "num_heads": num_heads,
                         "num_blocks": num_blocks,
                         "hidden_dim": hidden_dim,
@@ -340,12 +342,15 @@ def main():
                     logging=logging)
 
                 # Test model generative capabilities.
+
+                # Randomly pick one character from vocab to test model.
+                init_char = random.choice(vocab)
                 generate_text(
                     model=model_transformer,
                     vocab=vocab,
-                    start_token=in_seq[0, 0].item(),  # Pick first token in training data to test
+                    init_text=init_char,
                     context_window=context_window,
-                    logging=logging,
+                    logging=logging.info,
                     device=device,
                     temperature=1)
 
@@ -419,6 +424,7 @@ def main():
     # Checkpoint model weights.
     checkpoint_model(
         data_dict={
+            "vocab": vocab,
             "num_heads": num_heads,
             "num_blocks": num_blocks,
             "hidden_dim": hidden_dim,
@@ -432,12 +438,13 @@ def main():
         logging=logging)
 
     # Test model generative capabilities.
+    init_char = random.choice(vocab)
     generate_text(
         model=model_transformer,
         vocab=vocab,
-        start_token=in_seq[0, 0].item(),  # Picks first token in training data, to test
+        init_text=init_char,
         context_window=context_window,
-        logging=logging,
+        logging=logging.info,
         device=device,
         temperature=1)
 
