@@ -1,17 +1,33 @@
+import time
+
 import torch
 import torch.nn.functional as F
+
+# Prints a string one character at a time with a delay.
+def print_one_char_at_a_time(text, logging, delay=0.1):
+    try:
+        for char in text:
+            logging(char, end='', flush=True)
+            time.sleep(delay)
+    except KeyboardInterrupt:
+        logging("\n\n:(\nStopped text generation.")
 
 def generate_text(
         model,
         vocab,
+        device,
         init_text,
         context_window,
-        logging,
-        device,
+        logging=print,
+        print_slowly=False,
         temperature=1):
     vocab_size = len(vocab)
 
+    if print_slowly and logging is not print:
+        raise Exception("Can only print one character at a time, using print function.")
+
     model.eval()
+
     logging("#" * 100)
     logging(f"Initial Text:\n{repr(init_text)}\n")
 
@@ -40,6 +56,10 @@ def generate_text(
     pred_token_list = [vocab[c] for c in cleaned_pred_tokens]
     pred_txt = "".join(pred_token_list)
 
-    # TODO: Allow the option to print one character at a time.
-    logging(f"Generated text:\n{pred_txt}")
-    logging("#" * 100)
+    if print_slowly:
+        # Emulate effect of printing character by character.
+        logging("Generated text:")
+        print_one_char_at_a_time(pred_txt, logging, delay=0.1)
+    else:
+        logging(f"Generated text:\n{pred_txt}")
+        logging("#" * 100)

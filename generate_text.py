@@ -3,6 +3,8 @@ import codecs
 import pathlib
 import argparse
 
+import torch
+
 from models.DecoderTransformer import DecoderTransformer
 
 from utils.model_utils import load_model
@@ -52,6 +54,15 @@ def main():
         required=False,
         default=None,
         type=pathlib.Path)
+    parser.add_argument(
+        "--seed",
+        help="Seed value.",
+        type=int,
+        default=None)
+    parser.add_argument(
+        "--print-instant",
+        action='store_true',
+        help="Print text all at once, no character-by-character printing.")
 
     args = vars(parser.parse_args())
 
@@ -68,8 +79,13 @@ def main():
     """
     temperature = args["temperature"]
 
+    seed = args["seed"]
+    print_instant = args["print_instant"]
     device = args["device"]  # Device to run model on.
     model_checkpoint = args["model_checkpoint"]  # Filepath to models saved.
+
+    if seed is not None:
+        torch.manual_seed(seed)
 
     classifier_status, classifier_dict = load_model(model_checkpoint)
     if not classifier_status:
@@ -114,7 +130,7 @@ def main():
         vocab=vocab,
         init_text=validated_input,
         context_window=context_window,
-        logging=print,
+        print_slowly=not print_instant,
         device=device,
         temperature=temperature)
 
