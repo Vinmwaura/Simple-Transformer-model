@@ -47,7 +47,8 @@ def load_model(
         # Load checkpoint param in CPU.
         model_checkpoint = torch.load(
             checkpoint_path,
-            map_location=torch.device('cpu'))
+            map_location=torch.device('cpu'),
+            weights_only=True)
         success = True
     else:
         success = False
