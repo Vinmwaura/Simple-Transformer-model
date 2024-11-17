@@ -80,6 +80,10 @@ def main():
         type=str,
         default="cpu")
     parser.add_argument(
+        "--use-activation-checkpoint",
+        action='store_true',
+        help="Use Activation Checkpointing; trade-off memory footprint and compute.")
+    parser.add_argument(
         "--dataset-path",
         help="File path to json dataset file.",
         required=True,
@@ -149,6 +153,7 @@ def main():
     temperature = args["temperature"]
 
     device = args["device"]  # Device to run model on.
+    use_activation_checkpoint = args["use_activation_checkpoint"]
     load_optim = args["load_optim"]  # Reload saved optimizer weights.
     resume_training = args["resume_training"]
     dataset_path = args["dataset_path"]  # JSON file path (*.json).
@@ -218,7 +223,8 @@ def main():
         num_heads=num_heads,
         out_classes=vocab_size,
         num_blocks=num_blocks,
-        activation_type=activation_type)
+        activation_type=activation_type,
+        use_activation_checkpoint=use_activation_checkpoint)
 
     global_steps = 0
 
@@ -295,6 +301,7 @@ def main():
     logging.info(f"Embedding Dimension: {embedding_dim:,}")
     logging.info(f"Vocab Size: {vocab_size:,}")
     logging.info(f"Activation Type: {activation_type}")
+    logging.info(f"Using activation checkpoint: {use_activation_checkpoint}")
     logging.info(f"Model Learning Rate: {model_transformer_optim.param_groups[0]['lr']:,}")
     logging.info("#" * 100)
     logging.info("Training Parameters.")

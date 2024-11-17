@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torch.utils import checkpoint
+
 from .layers import (
     LinearBlock,
     TransformerBlock,
@@ -21,8 +23,12 @@ class DecoderTransformer(nn.Module):
             num_heads=8,
             num_blocks=6,
             out_classes=10,
-            activation_type="gelu"):
+            activation_type="gelu",
+            use_activation_checkpoint=False):
         super().__init__()
+
+        # More info. here: https://pytorch.org/docs/stable/checkpoint.html
+        self.use_activation_checkpoint = use_activation_checkpoint
 
         # Learnable Embedding and Positional Encoding.
         self.emb_layers = nn.Sequential(
@@ -76,8 +82,21 @@ class DecoderTransformer(nn.Module):
         # Decoder Blocks.
         x_dec = self.emb_layers(x)
         for decoder_block in self.decoder_blocks:
-            x_dec = decoder_block(x_dec)
+            if self.use_activation_checkpoint:
+                x_dec = checkpoint.checkpoint(
+                    decoder_block,
+                    x_dec,
+                    use_reentrant=False)
+            else:
+                x_dec = decoder_block(x_dec)
 
         # Classifer Out.
-        x_class = self.classifier(x_dec)
+        if self.use_activation_checkpoint:
+            x_class = checkpoint.checkpoint_sequential(
+                self.classifier,
+                segments=2,
+                input=x_dec,
+                use_reentrant=False)
+        else:
+            x_class = self.classifier(x_dec)
         return x_class
